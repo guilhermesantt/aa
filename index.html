@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/n5ro/aframe-physics-system@v4.0.1/dist/aframe-physics-system.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.5.0/dist/aframe-extras.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+    
+    <style>
+
+      /* Estilos do Analógico / Joystick */
+      #joystick-zone {
+        position: fixed;
+        bottom: 40px;
+        left: 40px;
+        width: 120px;
+        height: 120px;
+        z-index: 99999;
+        pointer-events: auto; 
+        touch-action: none;
+      }
+
+      /* Esconde o joystick se o usuário estiver no Computador com mouse */
+      @media (pointer: fine) {
+        #joystick-zone {
+          display: none;
+        }
+      }
+
+      /* Estilo do botão idêntico ao da imagem fornecida */
+      .btn-balaon {
+        background: rgba(73, 54, 44, 0.75);
+        color: #ffffff;
+        border: 2px solid rgba(255, 255, 255, 0.4);
+        padding: 10px 22px;
+        font-family: 'Georgia', serif;
+        font-size: 15px;
+        font-weight: bold;
+        border-radius: 50px;
+        cursor: pointer;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        white-space: nowrap;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.1s ease;
+      }
+
+      .btn-balaon:active {
+        transform: scale(0.92);
+      }
+
+      /* Container invisível que permite posicionar o botão HTML no espaço 3D */
+      .container-3d {
+        position: absolute;
+        z-index: 999;
+        pointer-events: auto;
+        transform: translate(-50%, -50%); 
+        display: block;
+      }
+
+      /* Fundo escuro do Pop-up da mensagem */
+      .janela-carta-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 10000;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Caixa de texto da cartinha aberta */
+      .janela-carta {
+        background: #fffdfa;
+        width: 85%;
+        max-width: 450px;
+        padding: 35px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        text-align: left;
+        font-family: 'Georgia', serif;
+        color: #332211;
+        border: 1px solid #e2dcd5;
+      }
+
+      .janela-carta h2 {
+        margin-top: 0;
+        font-size: 22px;
+        color: #5c4033;
+        border-bottom: 1px solid #ede6de;
+        padding-bottom: 10px;
+      }
+
+      .janela-carta p {
+        font-size: 16px;
+        line-height: 1.6;
+        white-space: pre-line;
+        margin-bottom: 25px;
+      }
+
+      .btn-fechar {
+        background: #d37e93;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        font-size: 14px;
+        border-radius: 6px;
+        cursor: pointer;
+        float: right;
+        font-weight: bold;
+      }
+    </style>
+
+    <script>
+
+      // COMPONENTE DO ANALÓGICO: Traduz os movimentos do joystick para o Rig da Câmera
+      AFRAME.registerComponent('joystick-controls', {
+        init: function () {
+          this.dox = 0;
+          this.doy = 0;
+          this.isMoving = false;
+          this.speed = 0.08; // Velocidade do movimento pelo analógico
+
+          // Configuração do NippleJS
+          const options = {
+            zone: document.getElementById('joystick-zone'),
+            mode: 'static',
+            position: { left: '50%', top: '50%' },
+            color: '#d37e93', // Cor rosa combinando com o tema
+            size: 100
+          };
+
+          this.manager = nipplejs.create(options);
+
+          // Captura quando o usuário mexe no analógico
+          this.manager.on('move', (evt, data) => {
+            if (data.direction) {
+              this.dox = Math.cos(data.angle.radian);
+              this.doy = Math.sin(data.angle.radian);
+              this.isMoving = true;
+            }
+          });
+
+          // Captura quando o usuário solta o analógico
+          this.manager.on('end', () => {
+            this.isMoving = false;
+            this.dox = 0;
+            this.doy = 0;
+          });
+        },
+
+        tick: function () {
+          if (!this.isMoving) return;
+
+          // Obtém a rotação atual da câmera para saber para onde o usuário está olhando
+          const cameraEl = this.el.querySelector('[camera]');
+          if (!cameraEl) return;
+          const rotation = cameraEl.getAttribute('rotation');
+          
+          // Ângulo de rotação em Radianos baseado no olhar do usuário
+          const angleY = rotation.y * Math.PI / 180;
+
+          // Calcula a direção correta para andar (frente/trás/lados relativos à visão)
+          const forwardX = -this.doy * Math.sin(angleY) + this.dox * Math.cos(angleY);
+          const forwardZ = -this.doy * Math.cos(angleY) - this.dox * Math.sin(angleY);
+
+          // Se o kinematic-body estiver ativo, usamos a velocidade diretamente na posição do Rig
+          const currentPosition = this.el.getAttribute('position');
+          
+          this.el.setAttribute('position', {
+            x: currentPosition.x + (forwardX * this.speed),
+            y: currentPosition.y, 
+            z: currentPosition.z + (forwardZ * this.speed)
+          });
+        }
+      });
+
+      // Componente que calcula a projeção 3D da carta para a tela 2D
+      AFRAME.registerComponent('rastrear-carta', {
+        init: function () {
+          this.botaoHtml = document.getElementById('container-botao');
+          this.cena = this.el.sceneEl;
+          this.camera = null;
+        },
+        tick: function () {
+          if (!this.camera) {
+            this.camera = this.cena.camera;
+            return;
+          }
+
+          if (this.botaoHtml.style.display === 'none') return;
+
+          var vetor3D = new THREE.Vector3();
+          this.el.object3D.getWorldPosition(vetor3D);
+          vetor3D.project(this.camera);
+
+          // Esconde se a carta estiver atrás das "costas" da câmera
+          if (vetor3D.z > 1) {
+            this.botaoHtml.style.visibility = 'hidden';
+            return;
+          } else {
+            this.botaoHtml.style.visibility = 'visible';
+          }
+
+          var x = (vetor3D.x * .5 + .5) * this.cena.clientWidth;
+          var y = (vetor3D.y * -.5 + .5) * this.cena.clientHeight;
+
+          this.botaoHtml.style.left = x + 'px';
+          this.botaoHtml.style.top = y + 'px';
+        }
+      });
+    </script>
+  </head>
+  <body>
+
+    <div id="joystick-zone"></div>
+
+    <div id="container-botao" class="container-3d">
+      <button id="botao-abrir" class="btn-balaon">Clique para cartinha</button>
+    </div>
+
+    <div id="overlay-mensagem" class="janela-carta-overlay">
+      <div class="janela-carta">
+        <h2>
+          De: Guilherme <br>
+          Para: Jamilly</h2>
+        <p>Querida Jamilly,
+
+        Sendo sincero, eu nem saberia por onde começar, porque hoje não quero que existam palavras sobre mim, apenas sobre você. Afinal, o dia é inteiramente seu. O dia da menina dona do sorriso mais contagiante que já vi, mas que também carrega em si uma força, uma beleza e uma garra admiráveis.
+
+        Você tem esse jeito único que te faz completamente diferente de tudo e de todos que já cruzei no mundo.
+
+        Tudo ao seu lado ganha uma leveza nova, um riso frouxo, uma paz bonita. Ao seu lado, as cores tem mais vida e a vida tem mais cores.
+
+        Feliz aniversário! Aproveita cada segundo do seu dia. Amo você, cabeçuda 💓
+      </p>
+        <button id="botao-fechar" class="btn-fechar">Fechar</button>
+      </div>
+    </div>
+
+    <a-scene physics="debug: false" light="defaultLightsEnabled: false">
+      
+      <a-assets>
+        <img id="foto1" src="https://i.imgur.com/WNaVNTA.png" crossorigin="anonymous">
+        <img id="foto2" src="https://i.imgur.com/TSIS7aJ.jpeg" crossorigin="anonymous">
+        <img id="foto3" src="https://i.imgur.com/GEZKHu5.jpeg" crossorigin="anonymous">
+        <img id="foto4" src="https://i.imgur.com/VHZvZ6P.jpeg" crossorigin="anonymous">
+        <img id="tetoNoite" src="https://i.imgur.com/FLDV8XQ.jpeg" crossorigin="anonymous">
+        <img id="meuChao" src="https://i.imgur.com/jpzTsJ4.jpeg" crossorigin="anonymous">
+
+        <video id="videoTv"
+       src="tv-video.mp4"
+       preload="auto"
+       autoplay
+       loop
+       playsinline
+       webkit-playsinline
+       crossorigin="anonymous">
+      </video>
+      </a-assets>
+
+      <a-entity light="type: ambient; color: #333344; intensity: 0.3"></a-entity>
+
+      <a-entity light="type: spot; 
+                      intensity: 1.8; 
+                      distance: 12; 
+                      angle: 55; 
+                      penumbra: 0.8; 
+                      color: #fff3db" 
+                position="0 5.4 -3" 
+                rotation="-90 0 0">
+      </a-entity>
+
+      <a-entity light="type: point; intensity: 0.8; distance: 5; color: #ffffff" position="0 3 -4.5"></a-entity>
+
+      <a-entity id="cameraRig" joystick-controls movement-controls="controls: keyboard, joystick-controls; speed: 0.20; constrainToNavMesh: false" kinematic-body="radius: 0.4; height: 1.6" position="0 0 0">
+        <a-entity camera look-controls="touchEnabled: true" position="0 1.6 0"></a-entity>
+      </a-entity>
+      
+      <a-box static-body position="0 2.75 -5.5" width="11" height="5.5" depth="0.5" color="#444448"></a-box> 
+      <a-box static-body position="-5.5 2.75 0" rotation="0 90 0" width="11" height="5.5" depth="0.5" color="#444448"></a-box>
+      <a-box static-body position="5.5 2.75 0" rotation="0 90 0" width="11" height="5.5" depth="0.5" color="#444448"></a-box>
+      <a-box static-body position="0 2.75 5.5" width="11" height="5.5" depth="0.5" color="#444448"></a-box>
+      
+      <a-plane static-body 
+               rotation="-90 0 0" 
+               width="11" 
+               height="11" 
+               material="src: #meuChao; repeat: 11 11; roughness: 0.4; metalness: 0.1">
+      </a-plane>
+      
+      <a-plane rotation="-90 0 180" position="0 5.5 0" width="11" height="11" material="src: #tetoNoite; side: double; shader: flat"></a-plane>
+
+      <a-entity id="pilha-presentes-grande" position="-4.3 0 -4.9" rotation="0 180 0">
+          <a-box position="-0.4 0.25 0" width="0.7" height="0.5" depth="0.7" color="#cc7da0"></a-box> 
+          <a-box position="0.4 0.3 0" width="0.8" height="0.6" depth="0.8" color="#d37e93"></a-box>  
+          <a-box position="0 0.2 -0.6" width="0.9" height="0.4" depth="0.9" color="#a65d70"></a-box>  
+          <a-box position="-0.3 0.7 0.1" width="0.5" height="0.4" depth="0.5" color="#cca01a"></a-box> 
+          <a-box position="0.3 0.8 0" width="0.6" height="0.5" depth="0.6" color="#dedad2"></a-box>   
+          <a-box position="0 0.7 -0.5" width="0.6" height="0.4" depth="0.6" color="#cca01a"></a-box>  
+          <a-box position="-0.1 1.1 0.2" width="0.4" height="0.3" depth="0.4" color="#d37e93"></a-box> 
+          <a-box position="0.2 1.2 0" width="0.4" height="0.4" depth="0.4" color="#cc7da0"></a-box>  
+          <a-box position="0 1.1 -0.4" width="0.4" height="0.3" depth="0.4" color="#a65d70"></a-box>  
+          <a-box position="0.1 1.5 0" width="0.3" height="0.2" depth="0.3" color="#cca01a"></a-box>   
+          <a-sphere position="-0.4 0.5 0.35" radius="0.05" color="#ffffff"></a-sphere> 
+          <a-sphere position="0.4 0.6 0.4" radius="0.05" color="#ffffff"></a-sphere>  
+          <a-sphere position="-0.3 0.9 0.35" radius="0.04" color="#a65d70"></a-sphere> 
+          <a-sphere position="0.3 1.05 0.3" radius="0.04" color="#a65d70"></a-sphere> 
+          <a-sphere position="-0.1 1.25 0.4" radius="0.03" color="#ffffff"></a-sphere> 
+          <a-sphere position="0.1 1.6 0.15" radius="0.02" color="#a65d70"></a-sphere> 
+      </a-entity>
+
+      <a-entity id="varal-aniversario" position="0 4.2 -5.15">
+        <a-line start="-3.6 0.3 0" end="3.6 0.3 0" color="#888888"></a-line>
+        <a-entity position="-3.15 0 0" rotation="0 0 4">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#dedad2" material="side: double; shader: flat"></a-triangle>
+          <a-text value="F" position="0.05 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-2.75 0 0" rotation="0 0 -3">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#d37e93" material="side: double; shader: flat"></a-triangle>
+          <a-text value="E" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-2.35 0 0" rotation="0 0 2">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#cca01a" material="side: double; shader: flat"></a-triangle>
+          <a-text value="L" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-1.95 0 0" rotation="0 0 -4">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#a65d70" material="side: double; shader: flat"></a-triangle>
+          <a-text value="I" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-1.55 0 0" rotation="0 0 5">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#cc7da0" material="side: double; shader: flat"></a-triangle>
+          <a-text value="Z" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-0.95 0 0" rotation="0 0 -2">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#914c61" material="side: double; shader: flat"></a-triangle>
+          <a-text value="A" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-0.55 0 0" rotation="0 0 4">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#dedad2" material="side: double; shader: flat"></a-triangle>
+          <a-text value="N" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="-0.15 0 0" rotation="0 0 -4">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#d37e93" material="side: double; shader: flat"></a-triangle>
+          <a-text value="I" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="0.25 0 0" rotation="0 0 3">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#cca01a" material="side: double; shader: flat"></a-triangle>
+          <a-text value="V" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="0.65 0 0" rotation="0 0 -5">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#a65d70" material="side: double; shader: flat"></a-triangle>
+          <a-text value="E" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="1.05 0 0" rotation="0 0 2">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#cc7da0" material="side: double; shader: flat"></a-triangle>
+          <a-text value="R" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="1.45 0 0" rotation="0 0 -3">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#914c61" material="side: double; shader: flat"></a-triangle>
+          <a-text value="S" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="1.85 0 0" rotation="0 0 4">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#dedad2" material="side: double; shader: flat"></a-triangle>
+          <a-text value="A" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="2.25 0 0" rotation="0 0 -2">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#d37e93" material="side: double; shader: flat"></a-triangle>
+          <a-text value="R" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="2.65 0 0" rotation="0 0 5">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#cca01a" material="side: double; shader: flat"></a-triangle>
+          <a-text value="I" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+        <a-entity position="3.05 0 0" rotation="0 0 -4">
+          <a-triangle vertex-a="-0.18 0.22 0" vertex-b="0.18 0.22 0" vertex-c="0 -0.35 0" color="#a65d70" material="side: double; shader: flat"></a-triangle>
+          <a-text value="O" position="0.03 0.02 0.01" scale="1.5 1.5 1.5" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="area-da-cama" position="0 0 4.25" rotation="0 0 0">
+        <a-box static-body position="0 0.25 -0.2" width="2.4" height="0.5" depth="2.4" color="#5c4033"></a-box>
+        <a-box static-body position="0 0.75 0.95" width="2.4" height="1.1" depth="0.1" color="#443329"></a-box>
+        <a-box position="0 0.55 -0.25" width="2.2" height="0.3" depth="2.2" color="#ffffff"></a-box>
+        <a-box position="-0.55 0.7 0.65" width="0.7" height="0.1" depth="0.4" color="#f7a8b8" rotation="10 0 0"></a-box>
+        <a-box position="0.55 0.7 0.65" width="0.7" height="0.1" depth="0.4" color="#f7a8b8" rotation="10 0 0"></a-box>
+        <a-box position="0 0.57 -0.9" width="2.22" height="0.28" depth="0.8" color="#d37e93"></a-box>
+
+        <a-sphere position="-0.4 0.71 0.1" radius="0.04" scale="1 0.2 1" color="#f7a8b8"></a-sphere>
+        <a-sphere position="0.3 0.71 0.2" radius="0.04" scale="1 0.2 1" color="#violet"></a-sphere>
+        <a-sphere position="-0.1 0.71 -0.3" radius="0.04" scale="1 0.2 1" color="#d37e93"></a-sphere>
+        <a-sphere position="0.5 0.71 -0.5" radius="0.04" scale="1 0.2 1" color="#ffffff"></a-sphere>
+        <a-sphere position="-0.5 0.71 -0.8" radius="0.04" scale="1 0.2 1" color="#violet"></a-sphere>
+        <a-sphere position="0.2 0.71 -1.0" radius="0.04" scale="1 0.2 1" color="#f7a8b8"></a-sphere>
+
+        <a-entity id="varal-jamilly" position="0 3.35 0.96" rotation="0 180 0">
+          <a-line start="-1.6 0.2 0" end="1.6 0.2 0" color="#888888"></a-line>
+          <a-entity position="-1.2 0 0.01" rotation="0 0 5">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#dedad2" material="side: double; shader: flat"></a-triangle>
+            <a-text value="J" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+          <a-entity position="-0.8 0 0.01" rotation="0 0 -3">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#d37e93" material="side: double; shader: flat"></a-triangle>
+            <a-text value="A" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+          <a-entity position="-0.4 0 0.01" rotation="0 0 2">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#cca01a" material="side: double; shader: flat"></a-triangle>
+            <a-text value="M" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+          <a-entity position="0 0 0.01" rotation="0 0 -4">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#a65d70" material="side: double; shader: flat"></a-triangle>
+            <a-text value="I" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+          <a-entity position="0.4 0 0.01" rotation="0 0 4">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#cc7da0" material="side: double; shader: flat"></a-triangle>
+            <a-text value="L" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+          <a-entity position="0.8 0 0.01" rotation="0 0 -2">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#914c61" material="side: double; shader: flat"></a-triangle>
+            <a-text value="L" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+          <a-entity position="1.2 0 0.01" rotation="0 0 5">
+            <a-triangle vertex-a="-0.16 0.2 0" vertex-b="0.16 0.2 0" vertex-c="0 -0.32 0" color="#dedad2" material="side: double; shader: flat"></a-triangle>
+            <a-text value="Y" position="0.03 0.02 0.01" scale="1.4 1.4 1.4" color="black" align="center" font="kelsonsans" shader="flat"></a-text>
+          </a-entity>
+        </a-entity>
+
+        <a-entity id="quadro-iluminado" position="0 2.3 0.94">
+          <a-box position="180 0 0" width="1.2" height="1.4" depth="0.02" color="#111111" material="shader: flat"></a-box>
+          <a-box position="0 0.68 0.03" width="1.24" height="0.05" depth="0.06" color="#2b1d14"></a-box>
+          <a-box position="0 -0.68 0.03" width="1.24" height="0.05" depth="0.06" color="#2b1d14"></a-box>
+          <a-box position="-0.58 0 0.03" width="0.05" height="1.32" depth="0.06" color="#2b1d14"></a-box>
+          <a-box position="0.58 0 0.03" width="0.05" height="1.32" depth="0.06" color="#2b1d14"></a-box>
+          <a-image position="0 0 0.02" width="1.05" height="1.25" src="#foto4" material="shader: flat"></a-image>
+          <a-entity light="type: point; intensity: 3; distance: 4; color: #ffebd1" position="0 0 0.04"></a-entity>
+        </a-entity>
+
+        <a-entity id="painel-tv-direita-grande" position="5.1 0 -4.5" rotation="0 -90 0">
+          <a-box static-body position="0 0.6 0" width="4.8" height="1.2" depth="0.9" color="#000000" material="roughness: 0.5"></a-box>
+          <a-box position="0 1.215 0" width="0.6" height="0.03" depth="0.3" color="#111111"></a-box>
+          <a-box position="0 1.32 0" width="0.12" height="0.18" depth="0.12" color="#111111"></a-box>
+          <a-box position="0 2.53 0" width="3.6" height="2.25" depth="0.075" color="#1a1a1a" material="roughness: 0.8"></a-box>
+          <a-plane position="0 2.53 0.039" width="3.48" height="2.13" src="#videoTv" controlador-tv material="shader: flat; roughness: 0.2"></a-plane>
+        </a-entity>
+
+        <a-entity id="lado-esquerdo" position="-1.6 0 0.3">
+          <a-box static-body position="0 0.3 0" width="0.5" height="0.6" depth="0.5" color="#443329"></a-box>
+          <a-box position="0 0.45 0.24" width="0.44" height="0.12" depth="0.02" color="#5c4033"></a-box>
+          <a-box position="0 0.20 0.24" width="0.44" height="0.22" depth="0.02" color="#5c4033"></a-box>
+          <a-sphere position="0 0.45 0.26" radius="0.015" color="#cca01a"></a-sphere>
+          <a-sphere position="0 0.20 0.26" radius="0.015" color="#cca01a"></a-sphere>
+          
+          <a-cylinder position="0 0.65 0" radius="0.01" height="0.1" color="#cca01a"></a-cylinder>
+          <a-cone position="0 0.78 0" radius-bottom="0.12" radius-top="0.06" height="0.18" color="#dedad2" material="side: double"></a-cone>
+          <a-entity light="type: point; intensity: 1.2; distance: 3; color: #ffdfa9" position="0 0.75 0"></a-entity>
+          
+          <a-cylinder position="0.15 0.63 -0.1" radius="0.04" height="0.06" color="#a65d70"></a-cylinder>
+          <a-sphere position="0.15 0.68 -0.1" radius="0.05" scale="1 0.7 1" color="#2e5c1e"></a-sphere>
+        </a-entity>
+
+        <a-entity id="lado-direito" position="1.6 0 0.1" rotation="0 180 0">
+          <a-box position="0 0.85 -0.19" width="0.6" height="1.7" depth="0.02" color="#2b1d14"></a-box>
+          <a-box position="-0.29 0.85 0" width="0.02" height="1.7" depth="0.38" color="#443329"></a-box>
+          <a-box position="0.29 0.85 0" width="0.02" height="1.7" depth="0.38" color="#443329"></a-box>
+          <a-box position="0 0.01 0" width="0.6" height="0.02" depth="0.38" color="#443329"></a-box>
+          <a-box position="0 1.7 0" width="0.6" height="0.02" depth="0.38" color="#443329"></a-box>
+
+          <a-box position="0 0.55 0" width="0.56" height="0.02" depth="0.36" color="#443329"></a-box>
+          <a-box position="0.15 0.7 0.05" width="0.05" height="0.25" depth="0.24" color="#a65d70"></a-box>
+          <a-box position="0.09 0.7 0.07" width="0.06" height="0.28" depth="0.22" color="#cca01a"></a-box>
+          <a-box position="0.02 0.7 0.06" width="0.04" height="0.24" depth="0.24" color="#d37e93"></a-box>
+          
+          <a-box position="0 1.1 0" width="0.56" height="0.02" depth="0.36" color="#443329"></a-box>
+          <a-box position="-0.05 1.14 0.05" width="0.22" height="0.05" depth="0.22" color="#dedad2"></a-box>
+          <a-box position="-0.05 1.20 0.05" width="0.20" height="0.06" depth="0.22" color="#914c61"></a-box>
+          <a-box position="-0.18 1.25 0.07" width="0.05" height="0.26" depth="0.20" color="#cc7da0" rotation="0 0 10"></a-box>
+
+          <a-cylinder position="0.1 1.14 0.05" radius="0.06" height="0.08" color="#dedad2"></a-cylinder>
+          <a-sphere position="0.1 1.19 0.05" radius="0.07" color="#2e5c1e"></a-sphere>
+          <a-box position="0.14 1.05 0.1" width="0.02" height="0.2" depth="0.1" color="#3a7d28" rotation="15 0 -10"></a-box>
+          <a-box position="0.06 1.02 0.12" width="0.02" height="0.25" depth="0.1" color="#2e5c1e" rotation="-10 0 15"></a-box>
+        </a-entity>
+
+        <a-plane position="0 0.01 -1.4" rotation="-90 0 0" width="2.6" height="1.2" color="#dedad2" material="roughness: 1"></a-plane>
+      </a-entity>
+      
+      <a-entity id="quadros-de-fotos" position="0 2.5 -5.20">
+        <a-box position="-1.1 0 0" width="1.6" height="2.1" depth="0.1" color="black"></a-box>
+        <a-image position="-1.1 0 0.06" width="1.4" height="1.9" src="#foto1"></a-image>
+
+        <a-box position="1.1 0 0" width="1.6" height="2.1" depth="0.1" color="black"></a-box>
+        <a-image position="1.1 0 0.06" width="1.4" height="1.9" src="#foto2"></a-image>
+      </a-entity>
+
+      <a-entity id="kit-aniversario" position="0 0 -4.7">
+        <a-box static-body position="0 1 0.08" width="3" height="0.08" depth="1.8" color="black"></a-box>
+        <a-box static-body position="-1.3 0.49 0.1" width="0.1" height="1.1" depth="1.5" color="black"></a-box>
+        <a-box static-body position="1.3 0.49 0.1" width="0.1" height="1.1" depth="1.5" color="black"></a-box>
+
+        <a-cylinder static-body position="0 1.15 0.19" radius="0.5" height="0.4" color="white"></a-cylinder>
+        <a-cylinder static-body position="0 1.4 0.19" radius="0.35" height="0.3" color="pink"></a-cylinder>
+        <a-text value="18" position="0 1.69 0.3" scale="1 1 1" color="#f7a8b8" align="center" font="kelsonsans"></a-text>
+
+        <a-entity id="refrigerante-1" position="-0.9 1.04 -0.2">
+          <a-cylinder radius="0.08" height="0.35" color="#064e3b" material="roughness: 0.3"></a-cylinder> 
+          <a-cylinder position="0 0.2 0" radius="0.03" height="0.06" color="#064e3b"></a-cylinder> 
+          <a-box position="0 0.02 0" width="0.165" height="0.08" depth="0.165" color="#d37e93"></a-box> 
+          <a-cylinder position="0 0.235 0" radius="0.032" height="0.015" color="white"></a-cylinder> 
+        </a-entity>
+
+        <a-entity id="refrigerante-2" position="-1.1 1.04 -0.4">
+          <a-cylinder radius="0.08" height="0.35" color="#1c1917" material="roughness: 0.3"></a-cylinder>
+          <a-cylinder position="0 0.2 0" radius="0.03" height="0.06" color="#1c1917"></a-cylinder>
+          <a-box position="0 0.02 0" width="0.165" height="0.08" depth="0.165" color="#cc7da0"></a-box>
+          <a-cylinder position="0 0.235 0" radius="0.032" height="0.015" color="red"></a-cylinder>
+        </a-entity>
+
+        <a-entity id="bandeja-coxinhas-esq" position="-0.8 1.04 0.1" rotation="0 -10 0">
+          <a-box width="0.5" height="0.02" depth="0.35" color="#f8fafc"></a-box>
+          <a-cone position="-0.15 0.04 -0.08" radius-bottom="0.025" height="0.05" color="#b45309" material="roughness: 0.9"></a-cone>
+          <a-cone position="-0.05 0.04 -0.07" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+          <a-cone position="0.05 0.04 -0.08" radius-bottom="0.025" height="0.05" color="#b45309" material="roughness: 0.9"></a-cone>
+          <a-cone position="0.15 0.04 -0.06" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+          <a-cone position="-0.1 0.04 0.06" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+          <a-cone position="0 0.04 0.07" radius-bottom="0.025" height="0.05" color="#b45309" material="roughness: 0.9"></a-cone>
+          <a-cone position="0.1 0.04 0.05" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+        </a-entity>
+
+        <a-entity id="bandeja-bolinhas-esq" position="-0.7 1.04 0.5" rotation="0 15 0">
+          <a-box width="0.4" height="0.02" depth="0.3" color="#f8fafc"></a-box>
+          <a-sphere position="-0.1 0.03 -0.05" radius="0.022" color="#d97706" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="-0.03 0.03 -0.05" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0.04 0.03 -0.04" radius="0.022" color="#d97706" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0.11 0.03 -0.05" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="-0.07 0.03 0.05" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0 0.03 0.06" radius="0.022" color="#d97706" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0.07 0.03 0.04" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+        </a-entity>
+
+        <a-entity id="bandeja-coxinhas" position="0.9 1.04 -0.1" rotation="0 15 0">
+          <a-box width="0.5" height="0.02" depth="0.35" color="#f8fafc"></a-box> 
+          <a-cone position="-0.15 0.04 -0.08" radius-bottom="0.025" height="0.05" color="#b45309" material="roughness: 0.9"></a-cone>
+          <a-cone position="-0.05 0.04 -0.07" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+          <a-cone position="0.05 0.04 -0.08" radius-bottom="0.025" height="0.05" color="#b45309" material="roughness: 0.9"></a-cone>
+          <a-cone position="0.15 0.04 -0.06" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+          <a-cone position="-0.1 0.04 0.06" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+          <a-cone position="0 0.04 0.07" radius-bottom="0.025" height="0.05" color="#b45309" material="roughness: 0.9"></a-cone>
+          <a-cone position="0.1 0.04 0.05" radius-bottom="0.025" height="0.05" color="#d97706" material="roughness: 0.9"></a-cone>
+        </a-entity>
+
+        <a-entity id="bandeja-bolinhas" position="0.8 1.04 0.4" rotation="0 -10 0">
+          <a-box width="0.4" height="0.02" depth="0.3" color="#f8fafc"></a-box> 
+          <a-sphere position="-0.1 0.03 -0.05" radius="0.022" color="#d97706" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="-0.03 0.03 -0.05" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0.04 0.03 -0.04" radius="0.022" color="#d97706" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0.11 0.03 -0.05" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="-0.07 0.03 0.05" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0 0.03 0.06" radius="0.022" color="#d97706" material="roughness: 0.8"></a-sphere>
+          <a-sphere position="0.07 0.03 0.04" radius="0.022" color="#b45309" material="roughness: 0.8"></a-sphere>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="mesa-decorada-esquerda" position="-4.55 0.95 -1.5">
+        <a-entity light="type: point; intensity: 0.4; distance: 3; color: #ffebd1" position="0 -0.4 0"></a-entity>
+        <a-box static-body position="-0.1 0 0" width="1.2" height="0.09" depth="2.4" color="#ffffff" material="roughness: 0.2"></a-box>
+        
+        <a-box position="-0.65 -0.47 -1.1" width="0.15" height="0.9" depth="0.09" color="#ffffff"></a-box>
+        <a-box position="-0.65 -0.47 1.1" width="0.15" height="0.9" depth="0.09" color="#ffffff"></a-box>
+        <a-box position="0.25 -0.47 -1.1" width="0.15" height="0.9" depth="0.09" color="#ffffff"></a-box>
+        <a-box position="0.25 -0.47 1.1" width="0.15" height="0.9" depth="0.09" color="#ffffff"></a-box>
+
+        <a-entity id="vaso-decorativo" position="0 0.045 -0.75">
+          <a-cylinder radius="0.09" height="0.27" color="#cca01a" material="roughness: 0.2; metalness: 0.4"></a-cylinder>
+          <a-cylinder position="0 0.33 0" radius="0.007" height="0.37" color="#443329" rotation="15 0 20"></a-cylinder>
+          <a-sphere position="0.09 0.48 0.03" radius="0.037" color="#d37e93"></a-sphere>
+          
+          <a-cylinder position="0 0.30 0" radius="0.007" height="0.3" color="#443329" rotation="-10 0 -15"></a-cylinder>
+          <a-sphere position="-0.06 0.42 -0.01" radius="0.03" color="#cc7da0"></a-sphere>
+        </a-entity>
+
+        <a-entity id="carta-central" position="0 0.05 0" rotation="0 12 0">
+          <a-entity id="ponto-ancora-botao" position="0 0.35 0" rastrear-carta></a-entity>
+          <a-plane width="0.48" height="0.30" color="#dedad2" rotation="-90 0 0" material="side: double; roughness: 1"></a-plane>        
+          <a-entity position="0 0.002 -0.15" rotation="-90 0 0">
+            <a-sphere position="-0.015 0 0" radius="0.016" color="#914c61"></a-sphere>
+            <a-sphere position="0.015 0 0" radius="0.016" color="#914c61"></a-sphere>
+            <a-dodecahedron position="0 -0.01 0" radius="0.016" color="#914c61" rotation="45 0 0"></a-dodecahedron>
+          </a-entity>
+          <a-text value="" position="-0.16 0.003 0.075" rotation="-90 0 0" scale="0.52 0.52 0.52" color="#443329" font="kelsonsans" align="left"></a-text>
+        </a-entity>
+
+        <a-entity id="porta-retratos" position="0 0.045 0.75" rotation="0 -20 0">
+          <a-box position="0 0.22 0" width="0.045" height="0.39" depth="0.30" color="#ffffff" rotation="0 0 -10"></a-box>
+          <a-box position="0.003 0.22 0" width="0.045" height="0.33" depth="0.24" color="#222222" rotation="0 0 -10"></a-box>
+          <a-box position="-0.09 0.12 0" width="0.18" height="0.03" depth="0.06" color="#d37e93" rotation="0 0 45"></a-box>
+        </a-entity>
+      </a-entity>
+
+      <a-entity position="-4.5 0.2 2.7" scale="1.5 1.5 1.5" rotation="0 90 0">
+          <a-box static-body position="0 1 0" width="2.8" height="2.2" depth="0.7" color="#6b4423"></a-box>
+          <a-box position="-0.7 1 0.36" width="1.3" height="2" depth="0.03" color="#7d5230"></a-box>
+          <a-box position="0.7 1 0.36" width="1.3" height="2" depth="0.03" color="#7d5230"></a-box>
+          <a-box position="0 1 0.37" width="0.05" height="2" depth="0.04" color="#3a2414"></a-box>
+          <a-cylinder position="-0.12 1 0.40" radius="0.025" height="0.35" color="#d4af37"></a-cylinder>
+          <a-cylinder position="0.12 1 0.40" radius="0.025" height="0.35" color="#d4af37"></a-cylinder>
+          <a-box position="0 2.15 0" width="2.95" height="0.12" depth="0.75" color="#4a2d18"></a-box>
+          <a-box position="0 -0.1 0" width="2.95" height="0.12" depth="0.75" color="#4a2d18"></a-box>
+      </a-entity>
+
+      <a-entity id="glitters-chao">
+        <a-plane position="-2 0.015 -3" rotation="-90 12 0" width="0.12" height="0.12" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="-1.5 0.015 -1" rotation="-90 45 0" width="0.15" height="0.09" color="#d37e93" shader="flat"></a-plane>
+        <a-plane position="-3.2 0.015 2" rotation="-90 -20 0" width="0.10" height="0.14" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="-0.8 0.015 3.5" rotation="-90 75 0" width="0.13" height="0.13" color="#d37e93" shader="flat"></a-plane>
+        <a-plane position="2.5 0.015 -2.5" rotation="-90 -60 0" width="0.14" height="0.08" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="3.8 0.015 1.2" rotation="-90 15 0" width="0.12" height="0.12" color="#d37e93" shader="flat"></a-plane>
+        <a-plane position="1.2 0.015 -1.8" rotation="-90 35 0" width="0.09" height="0.15" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="-4.1 0.015 -4.2" rotation="-90 -15 0" width="0.13" height="0.10" color="#d37e93" shader="flat"></a-plane>
+        <a-plane position="-4.5 0.015 1.5" rotation="-90 110 0" width="0.13" height="0.13" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="-0.2 0.015 4.3" rotation="-90 -50 0" width="0.11" height="0.15" color="#d37e93" shader="flat"></a-plane>
+        <a-plane position="4.3 0.015 -0.8" rotation="-90 22 0" width="0.14" height="0.09" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="2.9 0.015 4.1" rotation="-90 -80 0" width="0.12" height="0.12" color="#d37e93" shader="flat"></a-plane>
+        <a-plane position="-1.7 0.015 -4.8" rotation="-90 65 0" width="0.15" height="0.10" color="#f7a8b8" shader="flat"></a-plane>
+        <a-plane position="-2.8 0.015 -2" rotation="-90 -35 0" width="0.14" height="0.09" color="#violet" shader="flat"></a-plane>
+        <a-plane position="-0.5 0.015 -3.8" rotation="-90 55 0" width="0.12" height="0.12" color="#914c61" shader="flat"></a-plane>
+        <a-plane position="-2.2 0.015 1.5" rotation="-90 80 0" width="0.10" height="0.10" color="#violet" shader="flat"></a-entity>
+        <a-plane position="3.1 0.015 -3.5" rotation="-90 -10 0" width="0.15" height="0.11" color="#914c61" shader="flat"></a-plane>
+        <a-plane position="2.2 0.015 2.8" rotation="-90 65 0" width="0.12" height="0.09" color="#violet" shader="flat"></a-plane>
+        <a-plane position="0.5 0.015 1.9" rotation="-90 -45 0" width="0.11" height="0.14" color="#914c61" shader="flat"></a-plane>
+        <a-plane position="-1.9 0.015 -0.2" rotation="-90 25 0" width="0.14" height="0.07" color="#violet" shader="flat"></a-plane>
+        <a-plane position="-3.7 0.015 -2.9" rotation="-90 95 0" width="0.11" height="0.14" color="#violet" shader="flat"></a-plane>
+        <a-plane position="0.8 0.015 -2.2" rotation="-90 -15 0" width="0.13" height="0.11" color="#914c61" shader="flat"></a-plane>
+        <a-plane position="1.9 0.015 0.5" rotation="-90 40 0" width="0.15" height="0.08" color="#violet" shader="flat"></a-plane>
+        <a-plane position="-0.5 0.015 2.7" rotation="-90 -75 0" width="0.12" height="0.12" color="#914c61" shader="flat"></a-plane>
+        <a-plane position="3.6 0.015 -4.7" rotation="-90 10 0" width="0.14" height="0.09" color="#violet" shader="flat"></a-plane>
+        <a-plane position="-3.5 0.015 -1" rotation="-90 60 0" width="0.11" height="0.11" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="-1.2 0.015 -2.5" rotation="-90 -70 0" width="0.15" height="0.08" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="-2.7 0.015 3.1" rotation="-90 15 0" width="0.09" height="0.13" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="1.8 0.015 -4.1" rotation="-90 -25 0" width="0.12" height="0.12" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="3.5 0.015 -0.5" rotation="-90 40 0" width="0.14" height="0.10" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="2.7 0.015 1.8" rotation="-90 -85 0" width="0.08" height="0.14" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="0.9 0.015 3.9" rotation="-90 5 0" width="0.13" height="0.13" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="-4.8 0.015 -0.5" rotation="-90 -30 0" width="0.12" height="0.12" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="-2.9 0.015 4.5" rotation="-90 55 0" width="0.15" height="0.09" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="4.5 0.015 2.5" rotation="-90 135 0" width="0.10" height="0.14" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="0.2 0.015 -4.5" rotation="-90 -20 0" width="0.14" height="0.10" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="-1.4 0.015 1.1" rotation="-90 85 0" width="0.11" height="0.13" color="#cca01a" shader="flat"></a-plane>
+        <a-plane position="-1.0 0.015 -1.5" rotation="-90 -40 0" width="0.12" height="0.12" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="-3.9 0.015 0.5" rotation="-90 30 0" width="0.10" height="0.10" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="2.0 0.015 -1.2" rotation="-90 -15 0" width="0.14" height="0.07" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="4.2 0.015 -2.0" rotation="-90 50 0" width="0.11" height="0.11" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="1.5 0.015 3.2" rotation="-90 -55 0" width="0.09" height="0.14" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="-0.2 0.015 -2.9" rotation="-90 85 0" width="0.13" height="0.09" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="-2.5 0.015 -4.2" rotation="-90 -65 0" width="0.14" height="0.08" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="-4.0 0.015 3.8" rotation="-90 25 0" width="0.11" height="0.11" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="3.2 0.015 -1.5" rotation="-90 -45 0" width="0.15" height="0.09" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="1.1 0.015 2.3" rotation="-90 100 0" width="0.12" height="0.14" color="#ffffff" shader="flat"></a-plane>
+        <a-plane position="-0.9 0.015 -0.5" rotation="-90 -10 0" width="0.13" height="0.11" color="#ffffff" shader="flat"></a-plane>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const botaoAbrir = document.getElementById('botao-abrir');
+      const botaoFechar = document.getElementById('botao-fechar');
+      const overlayMensagem = document.getElementById('overlay-mensagem');
+      const containerBotao = document.getElementById('container-botao');
+
+      botaoAbrir.addEventListener('click', () => {
+        overlayMensagem.style.display = 'flex';
+        containerBotao.style.display = 'none';
+      });
+
+      botaoFechar.addEventListener('click', () => {
+        overlayMensagem.style.display = 'none';
+        containerBotao.style.display = 'block';
+      });
+      
+      AFRAME.registerComponent('controlador-tv', {
+        init: function () {
+          const meuVideo = document.getElementById('videoTv');
+          function iniciarVideo() {
+            if (meuVideo) {
+              meuVideo.play().catch(function(error) {
+                console.log("Navegador barrou o autoplay com som. Aguardando clique na tela.");
+              });
+            }
+          }
+          this.el.addEventListener('materialtextureloaded', iniciarVideo);
+          window.addEventListener('click', iniciarVideo, { once: true });
+          window.addEventListener('touchstart', iniciarVideo, { once: true });
+        }
+      });
+    </script>
+  </body>
+</html>
